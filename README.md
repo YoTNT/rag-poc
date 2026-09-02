@@ -1,3 +1,80 @@
+# rag-poc
+
+RAG (Retrieval-Augmented Generation) proof-of-concept over the
+[GuessHowMuch](https://github.com/YoTNT/GuessHowMuch) prediction
+reasoning corpus.
+
+**Goal:** validate whether retrieving similar past predictions at
+inference time provides meaningful signal, before committing to a
+production RAG microservice (Phase 1).
+
+**Result (TL;DR):** Yes — indicator-only embeddings show a **+24.6 pp
+accuracy delta** between high-context and low-context queries across
+710 predictions. Recommendation: **proceed to Phase 1** with an
+indicator-first embedding strategy.
+
+---
+
+## Motivation
+
+GuessHowMuch has accumulated a meaningful body of prediction data —
+710 verified predictions across Mega 7 + reward-tier stocks as of
+this writing. Each prediction includes the Claude-generated reasoning
+that led to the call, along with the actual outcome once verified the
+next trading day.
+
+The current system already learns from historical mistakes: a
+post-mortem worker analyzes wrong predictions and feeds abstract
+lessons into the prompt evolution pipeline (v1 → v4-bollinger-aware).
+This is prompt-level, batch-mode learning — accumulated wisdom gets
+compiled into a new prompt version every few weeks.
+
+But market situations repeat. Similar technical setups + similar
+news sentiment + similar price structures show up again and again,
+and Claude's judgment on those setups also follows patterns. With
+enough historical data, those patterns become retrievable.
+
+This POC explores whether retrieving concrete past cases at
+prediction time — not just relying on abstract compiled lessons —
+provides additional signal. It's meant as a **complement** to the
+existing prompt-evolution loop, not a replacement:
+
+| Mechanism | Granularity | Timing | Output |
+|---|---|---|---|
+| Post-mortem + Prompt evolution (existing) | Prompt-version level | Batch (weeks) | Abstract rules baked into system prompt |
+| **RAG (proposed)** | Per-prediction level | Real-time (per call) | Concrete similar past cases injected into context |
+
+The goal of this POC is to validate the approach and produce
+data-driven direction for a production-grade RAG microservice.
+
+---
+
+## Repo overview
+
+Five sequential scripts form the POC pipeline:
+
+```
+scripts/
+├── 01_export_predictions.py       Pull verified predictions from DynamoDB → JSON
+├── 02_generate_embeddings.py      Embed each prediction via OpenAI → pickle
+├── 03_search_similar.py           Interactive similarity-search CLI (eyeball retrieval quality)
+├── 04_analyze_patterns.py         Systematic signal check across the full corpus
+└── 05_compare_strategies.py       Compare 3 embedding strategies to find the best
+```
+
+**Data flow:**
+
+```
+DynamoDB predictions table
+    ↓ (script 01)
+data/predictions.json  (710 verified predictions)
+    ↓ (script 02)
+data/embeddings.pkl  (710 × 1536-dim OpenAI embeddings + metadata)
+    ↓ (script 03)                    (script 04)              (script 05)
+Manual eyeball QA          Systematic pattern analysis    Strategy comparison
+                                    ↓                              ↓
+                          data/pattern_analysis.csv   data/strategy_comparison.csv
+```
 
 **Design choices:**
 
